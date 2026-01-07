@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FLUX | Sovereign Intelligence Engine</title>
+    
+    <!-- React & DOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        flux: {
+                            900: '#050507', // Deep Space
+                            800: '#0a0a0f', // Panel BG
+                            700: '#14141f', // Card BG
+                            600: '#2a2a3d', // Border
+                            accent: '#6366f1', // Indigo Neon
+                            cyan: '#06b6d4', // Flux Core
+                            success: '#10b981',
+                            danger: '#ef4444',
+                            warning: '#f59e0b'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['Inter', 'sans-serif']
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                    },
+                    keyframes: {
+                        glow: {
+                            '0%': { boxShadow: '0 0 5px #6366f1' },
+                            '100%': { boxShadow: '0 0 20px #06b6d4' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #050507; }
+        ::-webkit-scrollbar-thumb { background: #2a2a3d; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+        
+        body { background-color: #050507; color: #e2e8f0; font-family: 'Inter', sans-serif; overflow: hidden; }
+        .glass-panel { background: rgba(20, 20, 31, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.05); }
+        .neon-text { text-shadow: 0 0 10px rgba(99, 102, 241, 0.5); }
+        .flux-loader { border-top-color: #06b6d4; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
+        
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // --- CONSTANTS & CONFIG ---
+        const FLUX_VERSION = "4.0.0-Titan";
+        const MODEL_NAME = "gemini-3-pro-preview"; 
+        
+        // --- UTILS & SERVICES ---
+        
+        // LocalStorage Wrapper
+        const useLocalStorage = (key, initialValue) => {
+            const [storedValue, setStoredValue] = React.useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    console.error(error);
+                    return initialValue;
+                }
+            });
+            const setValue = (value) => {
+                try {
+                    const valueToStore = value instanceof Function ? value(storedValue) : value;
+                    setStoredValue(valueToStore);
+                    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+                } catch (error) {
+                    console.error(error);
+                }
+            };
+            return [storedValue, setValue];
+        };
+
+        // Formatters
+        const formatNumber = (num) => {
+            if(!num) return '0';
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        };
+
+        const formatDuration = (isoDuration) => {
+            if (!isoDuration) return "0:00";
+            const match = isoDuration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+            const hours = (parseInt(match[1]) || 0);
+            const minutes = (parseInt(match[2]) || 0);
+            const seconds = (parseInt(match[3]) || 0);
+            if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        };
+
+        // --- FLUX AI ENGINE ---
+        const FluxAI = {
+            ask: async (query, contextData, apiKey) => {
+                // System Prompt Injection
+                const systemPrompt = `
+                    You are FLUX, an advanced YouTube Strategy AI.
+                    Your Goal: Maximize user's Views, Monetization Velocity, and Retention.
+                    
+                    KNOWLEDGE BASE:
+                    - Current Algorithm prioritizes: Session Time, AVD (Average View Duration), and High CTR.
+                    - "Ghost Mode": When impressions drop but CTR is high, it's an algorithm freeze.
+                    - For Shorts: The first 3 seconds are critical. 
+                    - Engagement Vector = (Likes+Comments+Shares)/Views.
+                    
+                    CONTEXT DATA (User's Channel):
+                    ${JSON.stringify(contextData)}
+                    
+                    USER QUERY: ${query}
+                    
+                    INSTRUCTIONS:
+                    - Be concise, direct, and data-driven.
+                    - Do not use generic advice. Use the provided numbers.
+                    - If data shows a freeze, suggest a "Pattern Interrupt".
+                `;
+
+                try {
+                    // Try Gemini 3 Pro Preview first
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: systemPrompt }] }]
+                        })
+                    });
+
+                    if (!response.ok) throw new Error(`Flux Connection Failed: ${response.status}`);
+                    const data = await response.json();
+                    return data.candidates[0].content.parts[0].text;
+                } catch (error) {
+                    // Fallback to Flash Model
+                    console.warn("Flux switched to backup neural pathway (Flash Model) due to: ", error);
+                    try {
+                        const fallbackResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: systemPrompt }] }] })
+                        });
+                        const fallbackData = await fallbackResponse.json();
+                        return "[FLUX RE-ROUTED]: " + fallbackData.candidates[0].content.parts[0].text;
+                    } catch (e) {
+                        return "FLUX OFFLINE: Please check your API Key in Settings.";
+                    }
+                }
+            }
+        };
+
+        // --- COMPONENTS ---
+
+        // 1. SETTINGS / VAULT
+        const Vault = ({ config, onSave, onCancel }) => {
+            const [formData, setFormData] = React.useState(config);
+            const [showKeys, setShowKeys] = React.useState(false);
+
+            const handleGoogleSignIn = () => {
+                if (!formData.clientId) {
+                    alert("Please enter a Client ID to use the automatic Sign-In button.");
+                    return;
+                }
+                const client = google.accounts.oauth2.initTokenClient({
+                    client_id: formData.clientId,
+                    scope: 'https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/youtube.readonly',
+                    callback: (response) => {
+                        if (response.access_token) {
+                            setFormData(prev => ({ ...prev, authToken: response.access_token }));
+                            alert("Flux Protocol: Access Token Secured.");
+                        }
+                    },
+                });
+                client.requestAccessToken();
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+                    <div className="bg-flux-800 border border-flux-600 rounded-xl w-full max-w-2xl p-6 shadow-2xl shadow-flux-accent/20">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                                <i className="fas fa-vault text-flux-accent"></i> The Vault
+                            </h2>
+                            <span className="text-xs text-flux-cyan font-mono border border-flux-cyan px-2 py-1 rounded">SECURE STORAGE</span>
+                        </div>
+
+                        <div className="space-y-4">
+                            {/* Gemini API */}
+                            <div>
+                                <label className="block text-gray-400 text-xs uppercase tracking-wider mb-1">Flux (Gemini) API Key</label>
+                                <div className="relative">
+                                    <input 
+                                        type={showKeys ? "text" : "password"} 
+                                        value={formData.geminiKey}
+                                        onChange={(e) => setFormData({...formData, geminiKey: e.target.value})}
+                                        className="w-full bg-flux-900 border border-flux-600 rounded p-3 text-white focus:border-flux-cyan focus:outline-none"
+                                        placeholder="AIza..."
+                                    />
+                                    <button onClick={() => setShowKeys(!showKeys)} className="absolute right-3 top-3 text-gray-500 hover:text-white">
+                                        <i className={`fas ${showKeys ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* YouTube Data API */}
+                            <div>
+                                <label className="block text-gray-400 text-xs uppercase tracking-wider mb-1">YouTube Data API Key</label>
+                                <input 
+                                    type={showKeys ? "text" : "password"}
+                                    value={formData.ytKey}
+                                    onChange={(e) => setFormData({...formData, ytKey: e.target.value})}
+                                    className="w-full bg-flux-900 border border-flux-600 rounded p-3 text-white focus:border-flux-cyan focus:outline-none"
+                                    placeholder="AIza..."
+                                />
+                            </div>
+
+                            {/* Channel UID */}
+                            <div>
+                                <label className="block text-gray-400 text-xs uppercase tracking-wider mb-1">Channel UID</label>
+                                <input 
+                                    type="text"
+                                    value={formData.channelId}
+                                    onChange={(e) => setFormData({...formData, channelId: e.target.value})}
+                                    className="w-full bg-flux-900 border border-flux-600 rounded p-3 text-white focus:border-flux-cyan focus:outline-none"
+                                    placeholder="UC..."
+                                />
+                            </div>
+
+                            <hr className="border-flux-600 my-4" />
+
+                            {/* OAuth Section */}
+                            <div className="bg-flux-900/50 p-4 rounded border border-dashed border-flux-600">
+                                <h3 className="text-flux-accent text-sm font-bold mb-2">Analytics Access (Private Data)</h3>
+                                
+                                <label className="block text-gray-400 text-xs uppercase tracking-wider mb-1">OAuth Client ID (Optional for Sign In Btn)</label>
+                                <input 
+                                    type="text"
+                                    value={formData.clientId}
+                                    onChange={(e) => setFormData({...formData, clientId: e.target.value})}
+                                    className="w-full bg-flux-900 border border-flux-600 rounded p-2 text-xs text-gray-300 mb-2"
+                                    placeholder="apps.googleusercontent.com..."
+                                />
+
+                                <div className="flex gap-2 items-center">
+                                    <button onClick={handleGoogleSignIn} className="bg-white text-black px-4 py-2 rounded font-bold hover:bg-gray-200 transition text-sm flex items-center gap-2">
+                                        <i className="fab fa-google"></i> Sign In with Google
+                                    </button>
+                                    <span className="text-gray-500 text-xs">OR Paste Token Manually Below</span>
+                                </div>
+
+                                <label className="block text-gray-400 text-xs uppercase tracking-wider mt-3 mb-1">Access Token (Bearer)</label>
+                                <textarea 
+                                    value={formData.authToken}
+                                    onChange={(e) => setFormData({...formData, authToken: e.target.value})}
+                                    className="w-full bg-flux-900 border border-flux-600 rounded p-3 text-white focus:border-flux-cyan focus:outline-none h-20 text-xs font-mono"
+                                    placeholder="ya29..."
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-6">
+                            {onCancel && (
+                                <button onClick={onCancel} className="px-4 py-2 text-gray-400 hover:text-white transition">Cancel</button>
+                            )}
+                            <button 
+                                onClick={() => onSave(formData)}
+                                className="bg-gradient-to-r from-flux-accent to-flux-cyan px-6 py-2 rounded font-bold text-white shadow-lg shadow-flux-cyan/20 hover:scale-105 transition transform"
+                            >
+                                SAVE CONFIGURATION
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 2. SIDEBAR
+        const Sidebar = ({ activeTab, setActiveTab, isOpen, toggleSidebar, openVault }) => {
+            const menuItems = [
+                { id: 'dashboard', icon: 'fa-chart-line', label: 'Flux Dashboard' },
+                { id: 'content', icon: 'fa-video', label: 'Content Lab' },
+                { id: 'monetize', icon: 'fa-coins', label: 'Monetization' },
+                { id: 'ghost', icon: 'fa-ghost', label: 'Ghost Mode' },
+                { id: 'chrono', icon: 'fa-clock', label: 'Chrono Sync' },
+            ];
+
+            return (
+                <div className={`${isOpen ? 'w-64' : 'w-20'} h-screen bg-flux-900 border-r border-flux-600 transition-all duration-300 flex flex-col fixed left-0 top-0 z-40`}>
+                    <div className="p-6 flex items-center gap-3 border-b border-flux-600/50">
+                        <div className="w-8 h-8 rounded bg-gradient-to-br from-flux-accent to-flux-cyan flex items-center justify-center shadow-lg shadow-flux-cyan/50">
+                            <i className="fas fa-bolt text-white text-sm"></i>
+                        </div>
+                        {isOpen && <h1 className="text-xl font-bold tracking-tighter text-white">FLUX</h1>}
+                    </div>
+
+                    <div className="flex-1 py-6 space-y-2">
+                        {menuItems.map(item => (
+                            <button
+                                key={item.id}
+                                onClick={() => setActiveTab(item.id)}
+                                className={`w-full flex items-center px-6 py-3 transition-colors relative group ${activeTab === item.id ? 'text-flux-cyan' : 'text-gray-400 hover:text-white'}`}
+                            >
+                                <i className={`fas ${item.icon} w-6 text-center text-lg`}></i>
+                                {isOpen && <span className="ml-3 font-medium text-sm">{item.label}</span>}
+                                {activeTab === item.id && <div className="absolute left-0 top-0 bottom-0 w-1 bg-flux-cyan shadow-[0_0_10px_#06b6d4]"></div>}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="p-4 border-t border-flux-600/50">
+                        <button 
+                            onClick={openVault}
+                            className="w-full flex items-center justify-center p-3 rounded bg-flux-800 hover:bg-flux-700 text-gray-400 hover:text-white transition group"
+                        >
+                            <i className="fas fa-cog group-hover:rotate-90 transition-transform duration-500"></i>
+                            {isOpen && <span className="ml-2 text-xs font-bold uppercase">Settings</span>}
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // 3. FLUX CHAT INTERFACE
+        const FluxChat = ({ context, mode = "PRIME", apiKey }) => {
+            const [messages, setMessages] = React.useState([
+                { role: 'flux', text: mode === "PRIME" 
+                    ? "Flux Online. I have analyzed your channel macro-data. What is our strategy today?" 
+                    : "Flux Focus Active. Ready to dissect this specific video's retention and metadata." 
+                }
+            ]);
+            const [input, setInput] = React.useState("");
+            const [loading, setLoading] = React.useState(false);
+            const scrollRef = React.useRef(null);
+
+            React.useEffect(() => {
+                if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }, [messages]);
+
+            const handleSend = async () => {
+                if(!input.trim()) return;
+                if(!apiKey) {
+                    setMessages(p => [...p, { role: 'user', text: input }, { role: 'flux', text: "ERROR: Flux Disconnected. Please add your Gemini API Key in Settings." }]);
+                    setInput("");
+                    return;
+                }
+
+                const userMsg = input;
+                setMessages(p => [...p, { role: 'user', text: userMsg }]);
+                setInput("");
+                setLoading(true);
+
+                const response = await FluxAI.ask(userMsg, context, apiKey);
+                
+                setMessages(p => [...p, { role: 'flux', text: response }]);
+                setLoading(false);
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-flux-800 rounded-xl border border-flux-600 overflow-hidden shadow-2xl">
+                    <div className="bg-flux-900 p-3 border-b border-flux-600 flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-flux-success animate-pulse"></div>
+                            <span className="font-mono text-xs text-flux-cyan tracking-widest uppercase">FLUX_{mode}_NEURAL_NET</span>
+                        </div>
+                        <i className="fas fa-network-wired text-flux-600"></i>
+                    </div>
+                    
+                    <div className="flex-1 p-4 overflow-y-auto space-y-4" ref={scrollRef}>
+                        {messages.map((msg, idx) => (
+                            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] p-3 rounded-lg text-sm leading-relaxed ${
+                                    msg.role === 'user' 
+                                    ? 'bg-flux-600 text-white rounded-tr-none' 
+                                    : 'bg-gradient-to-br from-flux-900 to-black border border-flux-cyan/30 text-gray-200 rounded-tl-none shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                                }`}>
+                                    {msg.role === 'flux' && <i className="fas fa-bolt text-flux-cyan mr-2 text-xs"></i>}
+                                    {msg.text}
+                                </div>
+                            </div>
+                        ))}
+                        {loading && (
+                            <div className="flex justify-start">
+                                <div className="bg-flux-900 p-3 rounded-lg border border-flux-cyan/30 flex gap-1 items-center">
+                                    <div className="w-1.5 h-1.5 bg-flux-cyan rounded-full animate-bounce"></div>
+                                    <div className="w-1.5 h-1.5 bg-flux-cyan rounded-full animate-bounce delay-100"></div>
+                                    <div className="w-1.5 h-1.5 bg-flux-cyan rounded-full animate-bounce delay-200"></div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="p-3 bg-flux-900 border-t border-flux-600">
+                        <div className="relative">
+                            <input 
+                                type="text" 
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                                placeholder="Command Flux..."
+                                className="w-full bg-flux-800 text-white border border-flux-600 rounded-lg pl-4 pr-12 py-3 focus:outline-none focus:border-flux-cyan font-mono text-sm"
+                            />
+                            <button 
+                                onClick={handleSend}
+                                className="absolute right-2 top-2 p-1.5 bg-flux-cyan text-black rounded hover:bg-white transition"
+                            >
+                                <i className="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 4. CONTENT LAB (List & Modal)
+        const ContentLab = ({ apiKey, data }) => {
+            const [selectedVideo, setSelectedVideo] = React.useState(null);
+
+            // Mock Data Generator for UI demonstration if API fails/empty
+            const videos = data.length > 0 ? data : Array(10).fill(0).map((_, i) => ({
+                id: `vid_${i}`,
+                title: `Viral Strategy Test #${i + 1}: The Algorithm Secret`,
+                thumbnail: `https://picsum.photos/300/170?random=${i}`,
+                views: Math.floor(Math.random() * 50000),
+                ctr: (Math.random() * 10 + 2).toFixed(1),
+                avd: "0:45",
+                retention: [100, 90, 80, 70, 40, 30, 25, 20], // Retention curve
+                type: i % 3 === 0 ? 'short' : 'video'
+            }));
+
+            return (
+                <div className="h-full flex flex-col p-6 overflow-hidden">
+                    <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+                        <i className="fas fa-flask text-flux-accent"></i> Content Lab
+                    </h2>
+
+                    {/* Video Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto pb-20">
+                        {videos.map((vid) => (
+                            <div 
+                                key={vid.id} 
+                                onClick={() => setSelectedVideo(vid)}
+                                className="bg-flux-800 border border-flux-600 rounded-lg overflow-hidden hover:border-flux-cyan transition cursor-pointer group relative"
+                            >
+                                <div className="relative aspect-video">
+                                    <img src={vid.thumbnail} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition" />
+                                    <span className="absolute bottom-2 right-2 bg-black/80 text-xs px-1 rounded text-white font-mono">
+                                        {vid.type === 'short' ? <i className="fab fa-youtube text-red-500"></i> : '12:04'}
+                                    </span>
+                                </div>
+                                <div className="p-3">
+                                    <h3 className="text-sm font-bold text-gray-200 truncate">{vid.title}</h3>
+                                    <div className="flex justify-between mt-2 text-xs font-mono text-gray-400">
+                                        <span><i className="fas fa-eye"></i> {formatNumber(vid.views)}</span>
+                                        <span className={vid.ctr > 8 ? "text-flux-success" : "text-flux-warning"}>CTR: {vid.ctr}%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* DEEP DIVE MODAL */}
+                    {selectedVideo && (
+                        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+                            <div className="w-full max-w-6xl h-[85vh] bg-flux-900 border border-flux-cyan/30 rounded-2xl shadow-[0_0_50px_rgba(6,182,212,0.1)] flex overflow-hidden">
+                                
+                                {/* Left: Data Viz */}
+                                <div className="w-1/2 p-6 border-r border-flux-600 overflow-y-auto">
+                                    <button onClick={() => setSelectedVideo(null)} className="mb-4 text-gray-400 hover:text-white flex items-center gap-2">
+                                        <i className="fas fa-arrow-left"></i> Back to Lab
+                                    </button>
+                                    
+                                    <img src={selectedVideo.thumbnail} className="w-full rounded-lg mb-4 border border-flux-600" />
+                                    <h1 className="text-xl font-bold text-white mb-2">{selectedVideo.title}</h1>
+                                    
+                                    <div className="grid grid-cols-3 gap-3 mb-6">
+                                        <div className="bg-flux-800 p-3 rounded text-center">
+                                            <div className="text-gray-400 text-xs uppercase">Views</div>
+                                            <div className="text-xl font-mono font-bold text-white">{formatNumber(selectedVideo.views)}</div>
+                                        </div>
+                                        <div className="bg-flux-800 p-3 rounded text-center">
+                                            <div className="text-gray-400 text-xs uppercase">CTR</div>
+                                            <div className="text-xl font-mono font-bold text-flux-cyan">{selectedVideo.ctr}%</div>
+                                        </div>
+                                        <div className="bg-flux-800 p-3 rounded text-center">
+                                            <div className="text-gray-400 text-xs uppercase">AVD</div>
+                                            <div className="text-xl font-mono font-bold text-white">{selectedVideo.avd}</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Retention Graph Visualization */}
+                                    <div className="bg-flux-800 p-4 rounded-lg border border-flux-600 mb-4">
+                                        <h4 className="text-xs uppercase text-gray-400 mb-2">Retention Curve (Visualized)</h4>
+                                        <div className="h-32 flex items-end gap-1">
+                                            {selectedVideo.retention.map((val, i) => (
+                                                <div 
+                                                    key={i} 
+                                                    style={{height: `${val}%`}} 
+                                                    className={`flex-1 rounded-t ${val < 50 ? 'bg-flux-danger' : 'bg-flux-success'} opacity-80 hover:opacity-100 transition`}
+                                                    title={`Second ${i*5}: ${val}% retention`}
+                                                ></div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-flux-800 p-4 rounded-lg border border-flux-600">
+                                        <h4 className="text-xs uppercase text-gray-400 mb-2">Flux Analysis</h4>
+                                        <p className="text-sm text-gray-300">
+                                            Retention dips significantly at the 25% mark. 
+                                            This indicates a failed "Hook Bridge". 
+                                            Ask Flux Focus to rewrite your intro script.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Right: Flux Focus Chat */}
+                                <div className="w-1/2 flex flex-col">
+                                    <div className="flex-1">
+                                        <FluxChat 
+                                            mode="FOCUS" 
+                                            context={selectedVideo} 
+                                            apiKey={apiKey} 
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // 5. DASHBOARD
+        const Dashboard = ({ apiKey, channelData }) => {
+            return (
+                <div className="h-full flex gap-4 p-6">
+                    {/* Left: Flux Prime */}
+                    <div className="w-2/3 h-full">
+                        <FluxChat 
+                            mode="PRIME" 
+                            context={{
+                                channelStatus: "Healthy",
+                                subscribers: channelData?.statistics?.subscriberCount || "0",
+                                recentUploads: 50,
+                                monetization: "In Progress"
+                            }} 
+                            apiKey={apiKey} 
+                        />
+                    </div>
+
+                    {/* Right: Widgets */}
+                    <div className="w-1/3 flex flex-col gap-4">
+                        {/* Live Ticker */}
+                        <div className="bg-flux-800 p-4 rounded-xl border border-flux-600">
+                            <h3 className="text-gray-400 text-xs uppercase tracking-widest mb-3">Live Telemetry</h3>
+                            <div className="space-y-4">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-300">Subscribers</span>
+                                    <span className="text-2xl font-mono font-bold text-white animate-pulse">
+                                        {formatNumber(channelData?.statistics?.subscriberCount)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-300">Total Views</span>
+                                    <span className="text-xl font-mono font-bold text-flux-cyan">
+                                        {formatNumber(channelData?.statistics?.viewCount)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-300">Video Count</span>
+                                    <span className="text-lg font-mono font-bold text-gray-400">
+                                        {channelData?.statistics?.videoCount || 0}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Monetization Velocity */}
+                        <div className="bg-flux-800 p-4 rounded-xl border border-flux-600 flex-1 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-flux-accent/10 rounded-full blur-2xl"></div>
+                            <h3 className="text-gray-400 text-xs uppercase tracking-widest mb-3">Monetization Velocity</h3>
+                            
+                            <div className="flex items-center justify-center py-6">
+                                <div className="w-32 h-32 rounded-full border-4 border-flux-700 flex items-center justify-center relative">
+                                    <div className="absolute inset-0 rounded-full border-4 border-flux-success border-t-transparent animate-spin"></div>
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-white">68%</div>
+                                        <div className="text-[10px] text-gray-400">TO PARTNER</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-center text-gray-400 mt-2">
+                                At current velocity, you will reach monetization criteria in <span className="text-white font-bold">42 Days</span>.
+                            </p>
+                        </div>
+
+                        {/* Ghost Mode Alert */}
+                        <div className="bg-flux-900/50 p-4 rounded-xl border border-dashed border-flux-600">
+                            <div className="flex items-center gap-2 mb-2">
+                                <i className="fas fa-ghost text-flux-cyan"></i>
+                                <span className="text-xs font-bold text-flux-cyan">GHOST MODE STATUS</span>
+                            </div>
+                            <div className="text-xs text-gray-400">
+                                Algorithm Health: <span className="text-flux-success">OPTIMAL</span>. 
+                                No shadowban detected. CTR/Impression ratio is stable.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 6. MONETIZATION SCREEN
+        const Monetization = () => (
+            <div className="p-10 text-center flex flex-col items-center justify-center h-full">
+                <i className="fas fa-coins text-6xl text-flux-warning mb-6 animate-bounce"></i>
+                <h1 className="text-3xl font-bold text-white mb-2">Monetization Accelerator</h1>
+                <p className="text-gray-400 max-w-lg">Flux is calculating your Revenue Per Mille (RPM) potential. Upload more Shorts to unlock the Velocity Graph.</p>
+                <div className="mt-8 grid grid-cols-2 gap-8 w-full max-w-2xl">
+                    <div className="bg-flux-800 p-6 rounded-xl border border-flux-600">
+                        <div className="text-sm text-gray-400">Watch Hours</div>
+                        <div className="text-3xl font-bold text-white mt-2">1,240 <span className="text-sm font-normal text-gray-500">/ 4000</span></div>
+                        <div className="w-full bg-flux-700 h-2 rounded mt-3 overflow-hidden">
+                            <div className="bg-flux-warning h-full w-[31%]"></div>
+                        </div>
+                    </div>
+                    <div className="bg-flux-800 p-6 rounded-xl border border-flux-600">
+                        <div className="text-sm text-gray-400">Shorts Views</div>
+                        <div className="text-3xl font-bold text-white mt-2">4.2M <span className="text-sm font-normal text-gray-500">/ 10M</span></div>
+                        <div className="w-full bg-flux-700 h-2 rounded mt-3 overflow-hidden">
+                            <div className="bg-flux-accent h-full w-[42%]"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+
+        // 7. CHRONO SYNC
+        const ChronoSync = () => (
+            <div className="p-6 h-full flex flex-col">
+                <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+                    <i className="fas fa-clock text-flux-cyan"></i> Chrono Sync <span className="text-xs bg-flux-cyan/20 text-flux-cyan px-2 py-1 rounded">AUDIENCE MATRIX</span>
+                </h2>
+                <div className="flex-1 bg-flux-800 rounded-xl border border-flux-600 p-6 flex flex-col items-center justify-center relative overflow-hidden">
+                    <div className="grid grid-cols-7 gap-1 w-full max-w-4xl">
+                        {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
+                            <div key={d} className="text-center text-xs text-gray-500 font-mono mb-2">{d}</div>
+                        ))}
+                        {Array(168).fill(0).map((_, i) => {
+                            const active = Math.random() > 0.7;
+                            const heavy = Math.random() > 0.9;
+                            return (
+                                <div 
+                                    key={i} 
+                                    className={`aspect-square rounded-sm transition hover:scale-125 ${
+                                        heavy ? 'bg-flux-accent shadow-[0_0_10px_#6366f1]' : 
+                                        active ? 'bg-flux-cyan/40' : 
+                                        'bg-flux-700/30'
+                                    }`}
+                                    title="Activity Heatmap Cell"
+                                ></div>
+                            )
+                        })}
+                    </div>
+                    <div className="mt-8 bg-flux-900 p-4 rounded-lg border border-flux-cyan/30 max-w-2xl w-full">
+                        <div className="flex items-start gap-3">
+                            <i className="fas fa-bolt text-flux-cyan mt-1"></i>
+                            <div>
+                                <h4 className="font-bold text-white text-sm">Flux Insight</h4>
+                                <p className="text-xs text-gray-300 mt-1">
+                                    Your audience is highly active on <span className="text-flux-accent font-bold">Fridays at 6 PM</span>. 
+                                    However, you currently upload on Tuesdays. 
+                                    <br/><br/>
+                                    <strong>Recommendation:</strong> Schedule your next high-production Short for Friday 17:45.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+
+        // 8. MAIN APP ORCHESTRATOR
+        const App = () => {
+            const [config, setConfig] = useLocalStorage('creator_mind_v1_config', {
+                geminiKey: '',
+                ytKey: '',
+                channelId: '',
+                authToken: '',
+                clientId: ''
+            });
+
+            const [sidebarOpen, setSidebarOpen] = React.useState(true);
+            const [activeTab, setActiveTab] = React.useState('dashboard');
+            const [showVault, setShowVault] = React.useState(false);
+            const [channelData, setChannelData] = React.useState(null);
+
+            // Initial Data Fetch
+            React.useEffect(() => {
+                const init = async () => {
+                    if (!config.geminiKey || !config.ytKey) {
+                        setShowVault(true);
+                        return;
+                    }
+
+                    // Fetch Channel Data
+                    if(config.channelId && config.ytKey) {
+                        try {
+                            const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=statistics,snippet&id=${config.channelId}&key=${config.ytKey}`);
+                            const json = await res.json();
+                            if(json.items && json.items.length > 0) {
+                                setChannelData(json.items[0]);
+                            }
+                        } catch (e) {
+                            console.error("YouTube API Error:", e);
+                        }
+                    }
+                };
+                init();
+            }, [config]);
+
+            const renderContent = () => {
+                switch(activeTab) {
+                    case 'dashboard': return <Dashboard apiKey={config.geminiKey} channelData={channelData} />;
+                    case 'content': return <ContentLab apiKey={config.geminiKey} data={[]} />; // Pass mock/real data here
+                    case 'monetize': return <Monetization />;
+                    case 'ghost': return <div className="p-10 text-center"><h1 className="text-white text-2xl">Ghost Mode Diagnostic Running...</h1><p className="text-gray-500">Analyzing Impression/CTR Vectors.</p></div>;
+                    case 'chrono': return <ChronoSync />;
+                    default: return <Dashboard />;
+                }
+            };
+
+            return (
+                <div className="flex h-screen bg-black overflow-hidden relative">
+                    {/* Background Ambient Effects */}
+                    <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-flux-accent/10 rounded-full blur-[100px] pointer-events-none"></div>
+                    <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-flux-cyan/5 rounded-full blur-[100px] pointer-events-none"></div>
+
+                    {/* Navigation */}
+                    <Sidebar 
+                        activeTab={activeTab} 
+                        setActiveTab={setActiveTab} 
+                        isOpen={sidebarOpen}
+                        toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+                        openVault={() => setShowVault(true)}
+                    />
+
+                    {/* Main Content Area */}
+                    <div className={`flex-1 flex flex-col transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-20'} relative z-10`}>
+                        {/* Header */}
+                        <div className="h-16 border-b border-flux-600 bg-black/50 backdrop-blur flex items-center justify-between px-6">
+                            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-400 hover:text-white transition">
+                                <i className="fas fa-bars text-xl"></i>
+                            </button>
+                            
+                            <div className="flex items-center gap-4">
+                                <div className="flex flex-col items-end">
+                                    <span className="text-sm font-bold text-white">{channelData?.snippet?.title || "Unknown Creator"}</span>
+                                    <span className="text-[10px] text-flux-success font-mono uppercase tracking-wider">
+                                        <i className="fas fa-circle text-[8px] mr-1"></i> Flux Connected
+                                    </span>
+                                </div>
+                                <img 
+                                    src={channelData?.snippet?.thumbnails?.default?.url || "https://ui-avatars.com/api/?name=Creator+Mind&background=6366f1&color=fff"} 
+                                    className="w-10 h-10 rounded-full border-2 border-flux-600" 
+                                />
+                            </div>
+                        </div>
+
+                        {/* Viewport */}
+                        <div className="flex-1 overflow-hidden relative">
+                            {renderContent()}
+                        </div>
+                    </div>
+
+                    {/* Vault Overlay */}
+                    {showVault && (
+                        <Vault 
+                            config={config} 
+                            onSave={(newConfig) => {
+                                setConfig(newConfig);
+                                setShowVault(false);
+                                window.location.reload(); // Hard reload to init services
+                            }}
+                            onCancel={() => config.geminiKey ? setShowVault(false) : null}
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
